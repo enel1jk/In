@@ -1,7 +1,5 @@
 package com.shang1jk.in;
 
-import android.content.Context;
-import android.net.ConnectivityManager;
 import android.net.DhcpInfo;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -10,6 +8,10 @@ import android.support.v7.app.ActionBarActivity;
 import android.util.Log;
 import android.view.View;
 
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.Inet4Address;
@@ -17,145 +19,73 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.util.Enumeration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
 
 public class MainActivity extends ActionBarActivity {
-    private final String ip = "192.168.1.107";
-    private Runtime runtime = null;
+    private final int IP_COUNT = 255 - 1 - 1;
+    private EndPoint local, gateway;
+    int count = IP_COUNT;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        runtime = Runtime.getRuntime();
         findViewById(R.id.scan).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                scanLAN();
-            }
-        });
-        findViewById(R.id.scan_udp).setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                new UdpProber().start();
-            }
-        });
+                count = IP_COUNT;
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        local = getLocal();
+                        gateway = getGateway();
+                        UdpProber udpProber = new UdpProber();
+                        udpProber.start();
 
-    }
-
-    /**
-     * scan LAN and deal the results
-     */
-    private void scanLAN() {
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    String localhost = getLocalhost();
-                    String ipPerfix = localhost.substring(0, localhost.lastIndexOf('.') + 1);
-                    Log.e(getLocalClassName(), "localhost:" + localhost);
-                    for (int i = 0; i < 256; i++) {
-                        String ip = ipPerfix + i;
-                        String mac = "";
-                        //TODO: 减小超时时间
-                        Process exec = runtime.exec("ping -c 1 -W 1 " + ip);    //ping 1 次，超时时间 1 秒
-                        boolean reachable = (exec.waitFor() == 0);
-
-                        InetAddress inetAddress = InetAddress.getByName(ip);
-                        if (reachable) {
-                            mac = getMac(inetAddress);
-                            if (mac != null) {
-                                Log.e(getLocalClassName(), "ip:" + ip + ", mac:" + mac);
+                        while (true) {
+                            if (count <= 0) {
+                                readArp();
+                                break;
                             }
-                        } else {
-                            Log.e(getLocalClassName(), "ip:: " + ip + " isn't reachable");
                         }
+
+//                        int tmp = count;
+//                        while (count > 0) {
+//                            if (tmp != count) {
+//                                tmp = count;
+//                                Log.e("xxx", "" + count);
+//                            }
+//                        }
+
                     }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+                }).start();
             }
-        }).start();
+        });
+
+        findViewById(R.id.read).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                readArp();
+            }
+        });
+
     }
 
-    /**
-     * 获取指定地址对应的mac
-     *
-     * @param inetAddress
-     * @return
-     */
-    private String getMac(InetAddress inetAddress) {
+    private void readArp() {
         try {
-            NetworkInterface ni = NetworkInterface.getByInetAddress(inetAddress);
-            byte[] mac = ni.getHardwareAddress();
-            StringBuffer sb = new StringBuffer();
-            for (byte b : mac) {
-                int i = b & 0xFF; //转为正整数
-                String s = Integer.toHexString(i).toUpperCase();
-                sb.append(s.length() == 1 ? 0 + s : s);
-                sb.append(":");
+            FileReader reader = new FileReader("/proc/net/arp");
+            BufferedReader bufferedReader = new BufferedReader(reader);
+            String s = null;
+            while ((s = bufferedReader.readLine()) != null) {
+                Log.e("arp table", s);
             }
-            sb.deleteCharAt(sb.length() - 1);
-            return sb.toString();
-        } catch (NullPointerException e) {
-            Log.e("error", inetAddress.getHostAddress());
+        } catch (FileNotFoundException e) {
             e.printStackTrace();
-        } catch (SocketException e) {
+        } catch (IOException e) {
             e.printStackTrace();
         }
-        return null;
-    }
-
-    /**
-     * @return 本地ip
-     */
-    private String getLocalhost() {
-        String localIp = null;
-        try {
-            Enumeration allNetInterfaces = NetworkInterface.getNetworkInterfaces();
-            while (allNetInterfaces.hasMoreElements()) {
-                NetworkInterface netInterface = (NetworkInterface) allNetInterfaces.nextElement();
-                if (netInterface.getName().toLowerCase().contains("wlan")) {
-                    Enumeration<InetAddress> inetAddresses = netInterface.getInetAddresses();
-                    while (inetAddresses.hasMoreElements()) {
-                        InetAddress inetAddress = inetAddresses.nextElement();
-                        if (inetAddress != null && inetAddress instanceof Inet4Address) {
-                            localIp = inetAddress.getHostAddress();
-                        }
-                    }
-                }
-            }
-        } catch (SocketException e) {
-            e.printStackTrace();
-        }
-        return localIp;
-    }
-
-    private InetAddress getHostAddress() {
-        try {
-            Enumeration allNetInterfaces = NetworkInterface.getNetworkInterfaces();
-            while (allNetInterfaces.hasMoreElements()) {
-                NetworkInterface netInterface = (NetworkInterface) allNetInterfaces.nextElement();
-                if (netInterface.getName().toLowerCase().contains("wlan")) {
-                    Enumeration<InetAddress> inetAddresses = netInterface.getInetAddresses();
-                    while (inetAddresses.hasMoreElements()) {
-                        InetAddress inetAddress = inetAddresses.nextElement();
-                        if (inetAddress != null && inetAddress instanceof Inet4Address) {
-                            return inetAddress;
-                        }
-                    }
-                }
-            }
-        } catch (SocketException e) {
-            e.printStackTrace();
-        }
-        return null;
     }
 
     private static final short NETBIOS_UDP_PORT = 137;
@@ -176,7 +106,7 @@ public class MainActivity extends ActionBarActivity {
 
 
     /**
-     * arp扫描？
+     * arp广播
      */
     private class UdpProber extends Thread {
         private static final int PROBER_THREAD_POOL_SIZE = 25;
@@ -190,11 +120,13 @@ public class MainActivity extends ActionBarActivity {
 
             @Override
             public void run() {
+                count--;
+                Log.e("xxx", "sub" + count);
                 try {
                     DatagramSocket socket = new DatagramSocket();
                     DatagramPacket packet = new DatagramPacket(NETBIOS_REQUEST, NETBIOS_REQUEST.length, mAddress, NETBIOS_UDP_PORT);
 
-                    socket.setSoTimeout(200);
+                    socket.setSoTimeout(1000);
                     socket.send(packet);
 
                     socket.close();
@@ -203,7 +135,7 @@ public class MainActivity extends ActionBarActivity {
             }
         }
 
-        private ThreadPoolExecutor mExecutor = null;
+        public ThreadPoolExecutor mExecutor = null;
 
         public UdpProber() {
             mExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(PROBER_THREAD_POOL_SIZE);
@@ -211,47 +143,66 @@ public class MainActivity extends ActionBarActivity {
 
         @Override
         public void run() {
-            Log.e("xxx", "UdpProber started ...");
+            Log.i(getClass().getSimpleName(), "UdpProber started ...");
 
-            InetAddress hostAddress = getHostAddress();
-            byte[] address = hostAddress.getAddress();
-            for (int i = 0; i < 250; i++) {
-                address[3] += 0b1;
-                try {
-                    InetAddress byAddress = Inet4Address.getByAddress(address);
-                    mExecutor.execute(new SingleProber(byAddress));
-                } catch (UnknownHostException e) {
-                    e.printStackTrace();
+            byte[] localIpByteArray = local.getIpByteArray();
+
+            for (int i = 0; i < 255; i++) {
+                if (i != local.getIpByteArray()[3] && i != gateway.getIpByteArray()[3]) {
+                    localIpByteArray[3]++;
+                    try {
+                        InetAddress byAddress = Inet4Address.getByAddress(localIpByteArray);
+                        mExecutor.execute(new SingleProber(byAddress));
+                    } catch (UnknownHostException e) {
+                        e.printStackTrace();
+
+
+                    }
                 }
             }
-
-        }
-
-        public synchronized void exit() {
-            try {
-                mExecutor.shutdown();
-                mExecutor.awaitTermination(30, TimeUnit.SECONDS);
-                mExecutor.shutdownNow();
-            } catch (Exception ignored) {
-            }
         }
     }
 
-    private void getDHCPInfo() {
-        /*
-        *
-        * gateway = new Target(mNetwork.getGatewayAddress(), mNetwork.getGatewayHardware()),
-        device = new Target(mNetwork.getLocalAddress(), mNetwork.getLocalHardware());
-        * */
+    /**
+     * @return 本地ip、mac
+     */
+    private EndPoint getLocal() {
         WifiManager wifiManager = (WifiManager) getSystemService(WIFI_SERVICE);
-        ConnectivityManager mConnectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
+        int ipAddress = dhcpInfo.ipAddress;
+        //ip
+        String localIp = EndPoint.convertIp2String(ipAddress);
+        //mac
+        String localMac = null;
+        try {
+            NetworkInterface mInterface = NetworkInterface.getByInetAddress(Inet4Address.getByAddress(EndPoint.convertIp2ByteArray(ipAddress)));
+            byte[] hardwareAddress = mInterface.getHardwareAddress();
+            localMac = EndPoint.convertMac2String(hardwareAddress);
+        } catch (SocketException e) {
+            e.printStackTrace();
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        }
+
+        Log.i(getLocalClassName(), "local: " + localIp + "\t" + localMac);
+        return new EndPoint(localIp, localMac);
+    }
+
+    /**
+     * @return 网关ip、mac
+     */
+    private EndPoint getGateway() {
+        WifiManager wifiManager = (WifiManager) getSystemService(WIFI_SERVICE);
         DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
         WifiInfo connectionInfo = wifiManager.getConnectionInfo();
-        int ipAddress = dhcpInfo.ipAddress;
         int gateway = dhcpInfo.gateway;
-        String bssid = connectionInfo.getBSSID();
-        NetworkInterface mInterface = NetworkInterface.getByInetAddress(getLocalAddress());
-    }
+        //ip
+        String gatewayIp = EndPoint.convertIp2String(gateway);
+        //mac
+        String gatewayMac = connectionInfo.getBSSID();
 
+        Log.i(getLocalClassName(), "gateway: " + gatewayIp + "\t" + gatewayMac.toUpperCase());
+        return new EndPoint(gatewayIp, gatewayMac);
+    }
 
 }
