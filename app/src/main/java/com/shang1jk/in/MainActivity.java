@@ -23,9 +23,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 
 public class MainActivity extends ActionBarActivity {
-    private final int IP_COUNT = 255 - 1 - 1;
+    private final int IP_COUNT = 256 - 2 - 2;   //256 - x.x.x.0 - x.x.x.255 - local - gateway
+    private final String ARP_PATH = "/proc/net/arp";
     private EndPoint local, gateway;
-    int count = IP_COUNT;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,7 +35,6 @@ public class MainActivity extends ActionBarActivity {
         findViewById(R.id.scan).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                count = IP_COUNT;
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -44,20 +43,14 @@ public class MainActivity extends ActionBarActivity {
                         UdpProber udpProber = new UdpProber();
                         udpProber.start();
 
+                        ThreadPoolExecutor executor = udpProber.getExecutor();
                         while (true) {
-                            if (count <= 0) {
+                            if (executor.getCompletedTaskCount() >= IP_COUNT) {
+                                executor.shutdown();
                                 readArp();
                                 break;
                             }
                         }
-
-//                        int tmp = count;
-//                        while (count > 0) {
-//                            if (tmp != count) {
-//                                tmp = count;
-//                                Log.e("xxx", "" + count);
-//                            }
-//                        }
 
                     }
                 }).start();
@@ -75,12 +68,16 @@ public class MainActivity extends ActionBarActivity {
 
     private void readArp() {
         try {
-            FileReader reader = new FileReader("/proc/net/arp");
+            FileReader reader = new FileReader(ARP_PATH);
             BufferedReader bufferedReader = new BufferedReader(reader);
             String s = null;
+            int pointCount = 0;
             while ((s = bufferedReader.readLine()) != null) {
+                pointCount++;
                 Log.e("arp table", s);
             }
+//            Log.e("point count: ", "" + pointCount);
+            System.out.println("" + pointCount);
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         } catch (IOException e) {
@@ -120,8 +117,6 @@ public class MainActivity extends ActionBarActivity {
 
             @Override
             public void run() {
-                count--;
-                Log.e("xxx", "sub" + count);
                 try {
                     DatagramSocket socket = new DatagramSocket();
                     DatagramPacket packet = new DatagramPacket(NETBIOS_REQUEST, NETBIOS_REQUEST.length, mAddress, NETBIOS_UDP_PORT);
@@ -132,10 +127,11 @@ public class MainActivity extends ActionBarActivity {
                     socket.close();
                 } catch (Exception ignored) {
                 }
+
             }
         }
 
-        public ThreadPoolExecutor mExecutor = null;
+        private ThreadPoolExecutor mExecutor = null;
 
         public UdpProber() {
             mExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(PROBER_THREAD_POOL_SIZE);
@@ -147,20 +143,24 @@ public class MainActivity extends ActionBarActivity {
 
             byte[] localIpByteArray = local.getIpByteArray();
 
-            for (int i = 0; i < 255; i++) {
+            //x.x.x.1~x.x.x.254
+            for (int i = 1; i < 255; i++) {
                 if (i != local.getIpByteArray()[3] && i != gateway.getIpByteArray()[3]) {
-                    localIpByteArray[3]++;
                     try {
                         InetAddress byAddress = Inet4Address.getByAddress(localIpByteArray);
                         mExecutor.execute(new SingleProber(byAddress));
                     } catch (UnknownHostException e) {
                         e.printStackTrace();
-
-
                     }
+                    localIpByteArray[3]++;
                 }
             }
         }
+
+        public ThreadPoolExecutor getExecutor() {
+            return mExecutor;
+        }
+
     }
 
     /**
