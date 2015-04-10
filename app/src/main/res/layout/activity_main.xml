@@ -12,12 +12,19 @@
         android:id="@+id/scan"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="扫描" />
+        android:text="单词扫描" />
 
     <Button
         android:id="@+id/read"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@+id/scan" />
+        android:layout_below="@id/scan"
+        android:text="read /proc/net/arp" />
 
+    <Button
+        android:id="@+id/scan_task"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/read"
+        android:text="开启定时扫描任务" />
 </RelativeLayout>
