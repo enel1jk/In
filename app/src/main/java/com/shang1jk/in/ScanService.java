@@ -1,39 +1,49 @@
 package com.shang1jk.in;
 
+import android.app.Service;
 import android.content.Intent;
-import android.os.Bundle;
-import android.support.v7.app.ActionBarActivity;
+import android.os.IBinder;
 import android.util.Log;
 
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.ThreadPoolExecutor;
 
-import butterknife.ButterKnife;
-import butterknife.OnClick;
-
-public class MainActivity extends ActionBarActivity {
+/**
+ * Created by Administrator on 2015/4/10.
+ */
+public class ScanService extends Service {
+    private final long SCAN_PERIOD = 2 * 60 * 1000; //扫描间隔时间
     private final int IP_COUNT = 256 - 2 - 2;   //256 - x.x.x.0 - x.x.x.255 - local - gateway
     private final String ARP_PATH = "/proc/net/arp";
     private EndPoint local, gateway;
+    private boolean isScanning = false;
+    private Timer timer;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-        ButterKnife.inject(this);
+    public IBinder onBind(Intent intent) {
+        return null;
     }
 
-    @OnClick(R.id.scan)
-    public void scanOnce() {
-        new Thread(new Runnable() {
+    @Override
+    public void onCreate() {
+        Log.i(getClass().getSimpleName(), "service onCreate");
+        local = NetUtil.getLocal(this);
+        gateway = NetUtil.getGateway(this);
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.e("xxx", "onStartCommand");
+        timer = new Timer("scan_timer", true);
+        TimerTask task = new TimerTask() {
             @Override
             public void run() {
-                local = NetUtil.getLocal(MainActivity.this);
-                gateway = NetUtil.getGateway(MainActivity.this);
-                UdpProber udpProber = new UdpProber(MainActivity.this);
+                UdpProber udpProber = new UdpProber(ScanService.this);
                 udpProber.start();
 
                 ThreadPoolExecutor executor = udpProber.getExecutor();
@@ -44,12 +54,18 @@ public class MainActivity extends ActionBarActivity {
                         break;
                     }
                 }
+
             }
-        }).start();
+        };
+        if (!isScanning) {
+            timer.schedule(task, 0, SCAN_PERIOD);
+            isScanning = true;
+        }
+
+        return super.onStartCommand(intent, flags, startId);
     }
 
-    @OnClick(R.id.read)
-    public void readArp() {
+    private void readArp() {
         try {
             FileReader reader = new FileReader(ARP_PATH);
             BufferedReader bufferedReader = new BufferedReader(reader);
@@ -64,15 +80,10 @@ public class MainActivity extends ActionBarActivity {
         }
     }
 
-    @OnClick(R.id.scan_task_start)
-    public void startScanTask() {
-        Intent service = new Intent(MainActivity.this, ScanService.class);
-        startService(service);
-    }
-
-    @OnClick(R.id.scan_task_stop)
-    public void stopScanTask() {
-        Intent service = new Intent(MainActivity.this, ScanService.class);
-        stopService(service);
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        timer.cancel();
+        Log.e("xxx", "ScanService onDestroy");
     }
 }
